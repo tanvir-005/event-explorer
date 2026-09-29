@@ -17,10 +17,13 @@ func NewEventService(
 	}
 }
 
-func (s *DefaultEventService) GetEvent(
-	eventID string,
-) (models.Event, error) {
+func (s *DefaultEventService) GetEvent(eventID string) (models.Event, error) {
 	return s.ticketmaster.GetEvent(eventID)
+}
+
+type categoryResult struct {
+	events []models.Event
+	err    error
 }
 
 func (s *DefaultEventService) GetEvents(
@@ -32,51 +35,72 @@ func (s *DefaultEventService) GetEvents(
 	musicErr error,
 	sportsErr error,
 ) {
-	music = s.getCategory(
-		city,
-		countryCode,
-		models.MusicCategory,
-		&musicErr,
-	)
+	musicCh := make(chan categoryResult, 1)
+	sportsCh := make(chan categoryResult, 1)
 
-	sports = s.getCategory(
-		city,
-		countryCode,
-		models.SportsCategory,
-		&sportsErr,
-	)
+	// Start Music request
+	go func() {
+		events, err := s.getCategory(
+			city,
+			countryCode,
+			models.MusicCategory,
+		)
 
-	return
+		musicCh <- categoryResult{
+			events: events,
+			err:    err,
+		}
+	}()
+
+	// Start Sports request
+	go func() {
+		events, err := s.getCategory(
+			city,
+			countryCode,
+			models.SportsCategory,
+		)
+
+		sportsCh <- categoryResult{
+			events: events,
+			err:    err,
+		}
+	}()
+
+	// Both goroutines have started before we wait for either result
+	musicResult := <-musicCh
+	sportsResult := <-sportsCh
+
+	return musicResult.events, sportsResult.events, musicResult.err, sportsResult.err
 }
 
 func (s *DefaultEventService) getCategory(
 	city string,
 	countryCode string,
 	category models.EventCategory,
-	errOut *error,
-) []models.Event {
+) ([]models.Event, error) {
 	key := models.EventCacheKey{
 		City:        city,
 		CountryCode: countryCode,
 		Category:    category,
 	}
 
+	// hit
 	if events, ok := s.cache.Get(key); ok {
-		return events
+		return events, nil
 	}
 
+	// miss: fetch from Ticketmaster
 	events, err := s.ticketmaster.GetEvents(
 		city,
 		countryCode,
 		category,
 	)
-
 	if err != nil {
-		*errOut = err
-		return nil
+		return nil, err
 	}
 
+	// only successful responses are cached
 	s.cache.Set(key, events)
 
-	return events
+	return events, nil
 }
