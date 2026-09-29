@@ -68,8 +68,7 @@ func (c *MemoryEventCache) InvalidateCity(
 	defer c.mu.Unlock()
 
 	for key := range c.entries {
-		if key.City == city &&
-			key.CountryCode == countryCode {
+		if key.City == city && key.CountryCode == countryCode {
 			delete(c.entries, key)
 		}
 	}
